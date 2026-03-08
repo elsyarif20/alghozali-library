@@ -6,7 +6,7 @@ from supabase import create_client, Client
 # ==========================================
 # 1. KONFIGURASI HALAMAN & KONEKSI SUPABASE
 # ==========================================
-st.set_page_config(page_title="Al-Ghozali Library", page_icon="📚", layout="wide")
+st.set_page_config(page_title="Al-Ghozali Library App", page_icon="📚", layout="wide")
 
 # Mengambil rahasia dari secrets.toml
 URL = st.secrets["SUPABASE_URL"]
@@ -17,14 +17,15 @@ supabase: Client = create_client(URL, KEY)
 # 2. FUNGSI DATABASE (CRUD KE SUPABASE)
 # ==========================================
 def fetch_books():
-    response = supabase.table("books").select("*").execute()
+    # Mengambil data buku, diurutkan berdasarkan ID
+    response = supabase.table("books").select("*").order("id_buku").execute()
     return pd.DataFrame(response.data)
 
 def fetch_history():
     response = supabase.table("borrow_history").select("*").execute()
     return pd.DataFrame(response.data)
 
-# Ambil data dari Supabase (Setiap halaman di-refresh, data terbaru akan ditarik)
+# Ambil data dari Supabase 
 df_books = fetch_books()
 
 # ==========================================
@@ -39,7 +40,7 @@ menu = st.sidebar.radio("Navigasi Menu", ["🏠 Beranda", "🔍 Katalog Buku", "
 # ==========================================
 if menu == "🏠 Beranda":
     st.title("Selamat Datang di Al-Ghozali Library 📚")
-    st.markdown("Menebar ilmu dan hikmah melalui literasi Islami.")
+    st.markdown("Menebar ilmu dan hikmah melalui literasi Islami untuk para siswa dan santri.")
     st.divider()
     
     col1, col2, col3 = st.columns(3)
@@ -52,10 +53,10 @@ if menu == "🏠 Beranda":
     col3.metric("Sedang Dipinjam", buku_dipinjam)
 
 # ==========================================
-# 5. HALAMAN KATALOG BUKU
+# 5. HALAMAN KATALOG BUKU (DENGAN FITUR BACA PDF)
 # ==========================================
 elif menu == "🔍 Katalog Buku":
-    st.title("Katalog Buku Perpustakaan")
+    st.title("Katalog Buku & E-Library")
     
     col1, col2 = st.columns(2)
     search_query = col1.text_input("Cari Judul Buku:")
@@ -73,13 +74,51 @@ elif menu == "🔍 Katalog Buku":
         if filter_kategori != "Semua Kategori":
             df_tampil = df_tampil[df_tampil['kategori'] == filter_kategori]
             
-    st.dataframe(df_tampil, use_container_width=True, hide_index=True)
+    st.divider()
+    
+    if not df_tampil.empty:
+        # Menampilkan buku satu per satu agar layout rapi untuk tombol PDF
+        for index, row in df_tampil.iterrows():
+            with st.container():
+                col_info, col_baca = st.columns([3, 1])
+                
+                with col_info:
+                    st.subheader(row['judul'])
+                    st.write(f"✍️ Penulis: **{row['penulis']}** | 🏷️ Kategori: **{row['kategori']}**")
+                    st.write(f"Status Fisik: **{row['status']}**")
+                
+                with col_baca:
+                    # Cek apakah kolom link_pdf ada isinya
+                    punya_pdf = pd.notna(row.get('link_pdf')) and row.get('link_pdf') != "" and row.get('link_pdf') is not None
+                    
+                    if punya_pdf:
+                        # Tombol Baca (Toggling state)
+                        state_key = f"baca_{row['id_buku']}"
+                        if state_key not in st.session_state:
+                            st.session_state[state_key] = False
+                            
+                        if st.button("📖 Baca E-Book", key=f"btn_{row['id_buku']}"):
+                            st.session_state[state_key] = not st.session_state[state_key]
+                    else:
+                        st.button("🚫 PDF Belum Ada", disabled=True, key=f"kosong_{row['id_buku']}")
+                
+                # Menampilkan PDF Viewer jika tombol ditekan
+                if punya_pdf and st.session_state.get(f"baca_{row['id_buku']}", False):
+                    st.markdown(f"**Membaca: {row['judul']}**")
+                    # Tampilkan PDF pakai HTML iframe
+                    pdf_viewer = f'<iframe src="{row["link_pdf"]}" width="100%" height="800px" style="border: none;"></iframe>'
+                    st.markdown(pdf_viewer, unsafe_allow_html=True)
+                    st.info("💡 Tip: Jika PDF tidak muncul, pastikan Bucket Storage di Supabase sudah diset ke 'Public'.")
+                
+                st.divider()
+    else:
+        st.warning("Buku tidak ditemukan di katalog.")
 
 # ==========================================
-# 6. HALAMAN PEMINJAMAN BUKU
+# 6. HALAMAN PEMINJAMAN BUKU FISIK
 # ==========================================
 elif menu == "🤝 Peminjaman":
-    st.title("Sistem Peminjaman Buku")
+    st.title("Sistem Peminjaman Buku Fisik")
     
     tab1, tab2 = st.tabs(["Pinjam Buku", "Kembalikan Buku"])
     
@@ -94,13 +133,9 @@ elif menu == "🤝 Peminjaman":
             
             if submit_pinjam:
                 if nama_peminjam and pilihan_buku != "Tidak ada buku tersedia":
-                    # Cari ID buku
                     id_buku = buku_tersedia.loc[buku_tersedia['judul'] == pilihan_buku, 'id_buku'].values[0]
-                    
-                    # 1. Update status di tabel books
                     supabase.table("books").update({"status": "Dipinjam"}).eq("id_buku", id_buku).execute()
                     
-                    # 2. Catat di tabel borrow_history
                     supabase.table("borrow_history").insert({
                         "nama_peminjam": nama_peminjam,
                         "id_buku": id_buku,
@@ -124,10 +159,7 @@ elif menu == "🤝 Peminjaman":
             if submit_kembali:
                 if pilihan_kembali != "Tidak ada buku dipinjam":
                     id_buku = buku_dipinjam.loc[buku_dipinjam['judul'] == pilihan_kembali, 'id_buku'].values[0]
-                    
-                    # Update status di tabel books menjadi Tersedia kembali
                     supabase.table("books").update({"status": "Tersedia"}).eq("id_buku", id_buku).execute()
-                    
                     st.success(f"Buku '{pilihan_kembali}' berhasil dikembalikan. Terima kasih!")
                     st.rerun()
 
@@ -135,9 +167,9 @@ elif menu == "🤝 Peminjaman":
 # 7. HALAMAN KELOLA BUKU (ADMIN)
 # ==========================================
 elif menu == "⚙️ Kelola Buku (Admin)":
-    st.title("Manajemen Koleksi Buku")
+    st.title("Manajemen Koleksi & Upload PDF")
     
-    with st.form("form_tambah_buku"):
+    with st.form("form_tambah_buku", clear_on_submit=True):
         st.subheader("Tambah Buku Baru")
         col1, col2 = st.columns(2)
         
@@ -146,7 +178,11 @@ elif menu == "⚙️ Kelola Buku (Admin)":
         new_penulis = col1.text_input("Penulis")
         new_kategori = col2.text_input("Kategori")
         
-        submit_tambah = st.form_submit_button("Simpan Buku")
+        st.markdown("---")
+        st.write("📁 **File E-Book (Opsional)**")
+        file_pdf = st.file_uploader("Upload File PDF agar bisa dibaca online", type=['pdf'])
+        
+        submit_tambah = st.form_submit_button("Simpan Buku ke Database")
         
         if submit_tambah:
             if new_id and new_judul and new_penulis and new_kategori:
@@ -156,17 +192,40 @@ elif menu == "⚙️ Kelola Buku (Admin)":
                 if len(cek_id.data) > 0:
                     st.error("ID Buku sudah ada! Gunakan ID lain.")
                 else:
+                    link_pdf_publik = ""
+                    
+                    # Jika ada file PDF yang di-upload
+                    if file_pdf is not None:
+                        # Bikin nama file unik pakai ID buku biar nggak bentrok
+                        nama_file_unik = f"{new_id}_{file_pdf.name}".replace(" ", "_")
+                        file_bytes = file_pdf.getvalue()
+                        
+                        try:
+                            # Upload ke Supabase Storage (Bucket 'buku_pdf')
+                            supabase.storage.from_("buku_pdf").upload(
+                                path=nama_file_unik,
+                                file=file_bytes,
+                                file_options={"content-type": "application/pdf"}
+                            )
+                            # Ambil link publiknya
+                            link_pdf_publik = supabase.storage.from_("buku_pdf").get_public_url(nama_file_unik)
+                        except Exception as e:
+                            st.warning(f"Buku tersimpan, tapi gagal upload PDF: {e}")
+                    
+                    # Simpan data ke tabel database
                     supabase.table("books").insert({
                         "id_buku": new_id,
                         "judul": new_judul,
                         "penulis": new_penulis,
                         "kategori": new_kategori,
-                        "status": "Tersedia"
+                        "status": "Tersedia",
+                        "link_pdf": link_pdf_publik
                     }).execute()
-                    st.success(f"Buku '{new_judul}' berhasil ditambahkan ke database!")
+                    
+                    st.success(f"Buku '{new_judul}' berhasil ditambahkan ke sistem!")
                     st.rerun()
             else:
-                st.error("Mohon isi semua kolom data buku!")
+                st.error("Mohon isi semua kolom data buku (ID, Judul, Penulis, Kategori)!")
                 
     st.divider()
     st.subheader("Database Saat Ini")
