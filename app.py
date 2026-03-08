@@ -77,7 +77,6 @@ elif menu == "🔍 Katalog Buku":
     st.divider()
     
     if not df_tampil.empty:
-        # Menampilkan buku satu per satu agar layout rapi untuk tombol PDF
         for index, row in df_tampil.iterrows():
             with st.container():
                 col_info, col_baca = st.columns([3, 1])
@@ -104,11 +103,20 @@ elif menu == "🔍 Katalog Buku":
                 
                 # Menampilkan PDF Viewer jika tombol ditekan
                 if punya_pdf and st.session_state.get(f"baca_{row['id_buku']}", False):
-                    st.markdown(f"**Membaca: {row['judul']}**")
-                    # Tampilkan PDF pakai HTML iframe
+                    st.markdown(f"### Membaca: {row['judul']}")
+                    
+                    # 1. TOMBOL BUKA DI TAB BARU (Solusi jika iframe diblokir browser/HP)
+                    st.markdown(f'''
+                        <a href="{row["link_pdf"]}" target="_blank" style="text-decoration: none;">
+                            <div style="background-color: #4CAF50; color: white; padding: 10px; border-radius: 5px; text-align: center; margin-bottom: 15px; font-weight: bold;">
+                                ↗️ Klik di sini untuk Buka PDF Layar Penuh
+                            </div>
+                        </a>
+                    ''', unsafe_allow_html=True)
+                    
+                    # 2. TAMPILAN IFRAME BAWAAN
                     pdf_viewer = f'<iframe src="{row["link_pdf"]}" width="100%" height="800px" style="border: none;"></iframe>'
                     st.markdown(pdf_viewer, unsafe_allow_html=True)
-                    st.info("💡 Tip: Jika PDF tidak muncul, pastikan Bucket Storage di Supabase sudah diset ke 'Public'.")
                 
                 st.divider()
     else:
@@ -173,7 +181,7 @@ elif menu == "⚙️ Kelola Buku (Admin)":
         st.subheader("Tambah Buku Baru")
         col1, col2 = st.columns(2)
         
-        new_id = col1.text_input("ID Buku (Contoh: B004)")
+        new_id = col1.text_input("ID Buku (Contoh: B005)")
         new_judul = col2.text_input("Judul Buku")
         new_penulis = col1.text_input("Penulis")
         new_kategori = col2.text_input("Kategori")
@@ -210,7 +218,7 @@ elif menu == "⚙️ Kelola Buku (Admin)":
                             # Ambil link publiknya
                             link_pdf_publik = supabase.storage.from_("buku_pdf").get_public_url(nama_file_unik)
                         except Exception as e:
-                            st.warning(f"Buku tersimpan, tapi gagal upload PDF: {e}")
+                            st.warning(f"File PDF gagal di-upload ke Storage: {e}. Pastikan Bucket sudah diset ke Public dan Policy Insert sudah aktif.")
                     
                     # Simpan data ke tabel database
                     supabase.table("books").insert({
