@@ -14,14 +14,10 @@ KEY = st.secrets["SUPABASE_KEY"]
 supabase: Client = create_client(URL, KEY)
 
 # ==========================================
-# 2. FUNGSI DATABASE (CRUD KE SUPABASE)
+# 2. FUNGSI DATABASE
 # ==========================================
 def fetch_books():
     response = supabase.table("books").select("*").order("id_buku").execute()
-    return pd.DataFrame(response.data)
-
-def fetch_history():
-    response = supabase.table("borrow_history").select("*").execute()
     return pd.DataFrame(response.data)
 
 df_books = fetch_books()
@@ -51,7 +47,7 @@ if menu == "🏠 Beranda":
     col3.metric("Sedang Dipinjam", buku_dipinjam)
 
 # ==========================================
-# 5. HALAMAN KATALOG BUKU
+# 5. HALAMAN KATALOG BUKU (UI BARU DENGAN SINOPSIS & COVER)
 # ==========================================
 elif menu == "🔍 Katalog Buku":
     st.title("Katalog Buku & E-Library")
@@ -77,40 +73,51 @@ elif menu == "🔍 Katalog Buku":
     if not df_tampil.empty:
         for index, row in df_tampil.iterrows():
             with st.container():
-                col_info, col_baca = st.columns([3, 1])
+                # Tampilan utama: Cover kecil di kiri, Info di kanan
+                col_img, col_info = st.columns([1, 5])
                 
+                with col_img:
+                    if pd.notna(row.get('cover_url')) and row.get('cover_url') != "":
+                        st.image(row['cover_url'], use_container_width=True)
+                    else:
+                        st.image("https://via.placeholder.com/150x200.png?text=No+Cover", use_container_width=True)
+                        
                 with col_info:
                     st.subheader(row['judul'])
-                    st.write(f"✍️ Penulis: **{row['penulis']}** | 🏷️ Kategori: **{row['kategori']}**")
+                    st.write(f"✍️ **Penulis:** {row['penulis']} | 🏷️ **Kategori:** {row['kategori']}")
                     st.write(f"Status Fisik: **{row['status']}**")
-                
-                with col_baca:
-                    punya_pdf = pd.notna(row.get('link_pdf')) and row.get('link_pdf') != "" and row.get('link_pdf') is not None
                     
-                    if punya_pdf:
-                        state_key = f"baca_{row['id_buku']}"
-                        if state_key not in st.session_state:
-                            st.session_state[state_key] = False
+                    # Dropdown Expander untuk melihat sinopsis dan baca buku
+                    with st.expander("📖 Lihat Sinopsis & Baca Buku"):
+                        st.write("**Sinopsis:**")
+                        sinopsis_teks = row.get('sinopsis')
+                        if pd.notna(sinopsis_teks) and sinopsis_teks != "":
+                            st.write(sinopsis_teks)
+                        else:
+                            st.write("*Sinopsis belum tersedia untuk buku ini.*")
+                        
+                        st.markdown("---")
+                        punya_pdf = pd.notna(row.get('link_pdf')) and row.get('link_pdf') != ""
+                        
+                        if punya_pdf:
+                            st.success("Buku Digital (PDF) Tersedia!")
+                            # Tombol utama untuk baca di tab baru (Solusi layar blank)
+                            st.markdown(f'''
+                                <a href="{row["link_pdf"]}" target="_blank" style="text-decoration: none;">
+                                    <div style="background-color: #4CAF50; color: white; padding: 12px; border-radius: 8px; text-align: center; font-weight: bold; font-size: 16px;">
+                                        ↗️ BACA BUKU (Buka PDF Layar Penuh)
+                                    </div>
+                                </a>
+                            ''', unsafe_allow_html=True)
                             
-                        if st.button("📖 Baca E-Book", key=f"btn_{row['id_buku']}"):
-                            st.session_state[state_key] = not st.session_state[state_key]
-                    else:
-                        st.button("🚫 PDF Belum Ada", disabled=True, key=f"kosong_{row['id_buku']}")
-                
-                if punya_pdf and st.session_state.get(f"baca_{row['id_buku']}", False):
-                    st.markdown(f"### Membaca: {row['judul']}")
-                    st.markdown(f'''
-                        <a href="{row["link_pdf"]}" target="_blank" style="text-decoration: none;">
-                            <div style="background-color: #4CAF50; color: white; padding: 10px; border-radius: 5px; text-align: center; margin-bottom: 15px; font-weight: bold;">
-                                ↗️ Klik di sini untuk Buka PDF Layar Penuh
-                            </div>
-                        </a>
-                    ''', unsafe_allow_html=True)
-                    
-                    pdf_viewer = f'<iframe src="{row["link_pdf"]}" width="100%" height="800px" style="border: none;"></iframe>'
-                    st.markdown(pdf_viewer, unsafe_allow_html=True)
-                
-                st.divider()
+                            st.caption("Jika bingkai di bawah ini putih/blank, gunakan tombol hijau di atas.")
+                            # Alternatif embed menggunakan tag <embed> yang terkadang lebih stabil dari iframe
+                            pdf_viewer = f'<embed src="{row["link_pdf"]}#toolbar=0" width="100%" height="600px" type="application/pdf">'
+                            st.markdown(pdf_viewer, unsafe_allow_html=True)
+                        else:
+                            st.warning("🚫 File PDF E-Book belum tersedia untuk buku ini.")
+                            
+            st.divider()
     else:
         st.warning("Buku tidak ditemukan di katalog.")
 
@@ -160,16 +167,15 @@ elif menu == "🤝 Peminjaman":
                 if pilihan_kembali != "Tidak ada buku dipinjam":
                     id_buku = buku_dipinjam.loc[buku_dipinjam['judul'] == pilihan_kembali, 'id_buku'].values[0]
                     supabase.table("books").update({"status": "Tersedia"}).eq("id_buku", id_buku).execute()
-                    st.success(f"Buku '{pilihan_kembali}' berhasil dikembalikan. Terima kasih!")
+                    st.success(f"Buku '{pilihan_kembali}' berhasil dikembalikan.")
                     st.rerun()
 
 # ==========================================
-# 7. HALAMAN KELOLA BUKU (ADMIN) - DENGAN FULL CRUD
+# 7. HALAMAN KELOLA BUKU (ADMIN)
 # ==========================================
 elif menu == "⚙️ Kelola Buku (Admin)":
     st.title("Manajemen Koleksi (CRUD)")
     
-    # Membuat dua Tab: Satu untuk Tambah, Satu untuk Edit/Hapus
     tab_tambah, tab_edit = st.tabs(["➕ Tambah Buku Baru", "✏️ Edit / Hapus Buku"])
     
     # ---------------- TAB 1: TAMBAH BUKU ----------------
@@ -183,8 +189,12 @@ elif menu == "⚙️ Kelola Buku (Admin)":
             new_penulis = col1.text_input("Penulis")
             new_kategori = col2.text_input("Kategori")
             
-            st.write("📁 **File E-Book (Opsional)**")
-            file_pdf = st.file_uploader("Upload File PDF", type=['pdf'], key="upload_baru")
+            new_sinopsis = st.text_area("Sinopsis Buku", height=100)
+            
+            st.markdown("---")
+            col_file1, col_file2 = st.columns(2)
+            file_cover = col_file1.file_uploader("🖼️ Upload Cover Buku (JPG/PNG)", type=['jpg', 'jpeg', 'png'])
+            file_pdf = col_file2.file_uploader("📁 Upload File E-Book (PDF)", type=['pdf'])
             
             submit_tambah = st.form_submit_button("Simpan Buku ke Database")
             
@@ -196,27 +206,33 @@ elif menu == "⚙️ Kelola Buku (Admin)":
                         st.error("ID Buku sudah ada! Gunakan ID lain.")
                     else:
                         link_pdf_publik = ""
+                        link_cover_publik = ""
+                        timestamp = int(time.time())
                         
+                        # Upload PDF
                         if file_pdf is not None:
-                            # Tambahkan timestamp agar nama file selalu unik
-                            timestamp = int(time.time())
-                            nama_file_unik = f"{new_id}_{timestamp}.pdf"
-                            file_bytes = file_pdf.getvalue()
-                            
+                            nama_file_pdf = f"{new_id}_{timestamp}.pdf"
                             try:
-                                supabase.storage.from_("buku_pdf").upload(
-                                    path=nama_file_unik,
-                                    file=file_bytes,
-                                    file_options={"content-type": "application/pdf"}
-                                )
-                                link_pdf_publik = supabase.storage.from_("buku_pdf").get_public_url(nama_file_unik)
+                                supabase.storage.from_("buku_pdf").upload(nama_file_pdf, file_pdf.getvalue(), file_options={"content-type": "application/pdf"})
+                                link_pdf_publik = supabase.storage.from_("buku_pdf").get_public_url(nama_file_pdf)
                             except Exception as e:
                                 st.warning(f"Gagal upload PDF: {e}")
+                                
+                        # Upload Cover
+                        if file_cover is not None:
+                            nama_file_cover = f"{new_id}_{timestamp}_{file_cover.name}".replace(" ", "_")
+                            try:
+                                supabase.storage.from_("buku_cover").upload(nama_file_cover, file_cover.getvalue(), file_options={"content-type": file_cover.type})
+                                link_cover_publik = supabase.storage.from_("buku_cover").get_public_url(nama_file_cover)
+                            except Exception as e:
+                                st.warning(f"Gagal upload Cover: {e}")
                         
+                        # Simpan ke Database
                         supabase.table("books").insert({
                             "id_buku": new_id, "judul": new_judul,
                             "penulis": new_penulis, "kategori": new_kategori,
-                            "status": "Tersedia", "link_pdf": link_pdf_publik
+                            "status": "Tersedia", "link_pdf": link_pdf_publik,
+                            "sinopsis": new_sinopsis, "cover_url": link_cover_publik
                         }).execute()
                         
                         st.success(f"Buku '{new_judul}' berhasil ditambahkan!")
@@ -229,74 +245,68 @@ elif menu == "⚙️ Kelola Buku (Admin)":
         st.subheader("Edit atau Hapus Data Katalog")
         
         if not df_books.empty:
-            # Dropdown untuk memilih buku yang mau diedit
             buku_pilihan = st.selectbox("Pilih Judul Buku:", df_books['judul'].tolist())
-            
-            # Ambil detail buku yang dipilih dari dataframe
             data_buku = df_books[df_books['judul'] == buku_pilihan].iloc[0]
             
             with st.form("form_edit_buku"):
-                st.info(f"Mengedit ID Buku: **{data_buku['id_buku']}** (ID tidak bisa diubah)")
+                st.info(f"Mengedit ID Buku: **{data_buku['id_buku']}**")
                 
                 col1, col2 = st.columns(2)
                 edit_judul = col1.text_input("Judul Buku", value=data_buku['judul'])
                 edit_penulis = col2.text_input("Penulis", value=data_buku['penulis'])
                 edit_kategori = col1.text_input("Kategori", value=data_buku['kategori'])
                 
-                # Setting index dropdown status
                 index_status = 0 if data_buku['status'] == "Tersedia" else 1
                 edit_status = col2.selectbox("Status Ketersediaan", ["Tersedia", "Dipinjam"], index=index_status)
                 
-                st.markdown("---")
-                st.write("📁 **Update E-Book / PDF**")
-                st.write("*Biarkan kosong jika tidak ingin mengubah file PDF yang sudah ada.*")
-                edit_pdf = st.file_uploader("Upload PDF Pengganti (Opsional)", type=['pdf'], key="upload_edit")
+                # Menggunakan fungsi get() dengan nilai default kosong jika kolom belum ada di baris tersebut
+                isi_sinopsis = data_buku.get('sinopsis', '')
+                if pd.isna(isi_sinopsis): isi_sinopsis = ''
+                edit_sinopsis = st.text_area("Sinopsis Buku", value=isi_sinopsis, height=100)
                 
                 st.markdown("---")
-                # Tombol Aksi
+                st.write("*Biarkan kosong jika tidak ingin mengubah Cover/PDF yang lama.*")
+                col_up1, col_up2 = st.columns(2)
+                edit_cover = col_up1.file_uploader("Ganti Cover (Opsional)", type=['jpg', 'jpeg', 'png'], key="edit_cover")
+                edit_pdf = col_up2.file_uploader("Ganti PDF (Opsional)", type=['pdf'], key="edit_pdf")
+                
+                st.markdown("---")
                 col_btn1, col_btn2 = st.columns(2)
-                submit_update = col_btn1.form_submit_button("💾 Simpan Perubahan (Update)", type="primary")
+                submit_update = col_btn1.form_submit_button("💾 Simpan Perubahan", type="primary")
                 submit_delete = col_btn2.form_submit_button("🗑️ Hapus Buku Ini")
                 
                 if submit_update:
-                    link_pdf_baru = data_buku['link_pdf'] # Default pakai link lama
+                    link_pdf_baru = data_buku.get('link_pdf', '')
+                    link_cover_baru = data_buku.get('cover_url', '')
+                    timestamp = int(time.time())
                     
-                    # Jika admin mengupload PDF baru untuk me-replace yang lama
                     if edit_pdf is not None:
-                        timestamp = int(time.time())
-                        nama_file_unik = f"{data_buku['id_buku']}_update_{timestamp}.pdf"
-                        file_bytes = edit_pdf.getvalue()
-                        
+                        nama_file_pdf = f"{data_buku['id_buku']}_update_{timestamp}.pdf"
                         try:
-                            supabase.storage.from_("buku_pdf").upload(
-                                path=nama_file_unik, file=file_bytes,
-                                file_options={"content-type": "application/pdf"}
-                            )
-                            link_pdf_baru = supabase.storage.from_("buku_pdf").get_public_url(nama_file_unik)
-                        except Exception as e:
-                            st.warning(f"Gagal update PDF: {e}")
+                            supabase.storage.from_("buku_pdf").upload(nama_file_pdf, edit_pdf.getvalue(), file_options={"content-type": "application/pdf"})
+                            link_pdf_baru = supabase.storage.from_("buku_pdf").get_public_url(nama_file_pdf)
+                        except Exception as e: pass
+                            
+                    if edit_cover is not None:
+                        nama_file_cover = f"{data_buku['id_buku']}_update_{timestamp}_{edit_cover.name}".replace(" ", "_")
+                        try:
+                            supabase.storage.from_("buku_cover").upload(nama_file_cover, edit_cover.getvalue(), file_options={"content-type": edit_cover.type})
+                            link_cover_baru = supabase.storage.from_("buku_cover").get_public_url(nama_file_cover)
+                        except Exception as e: pass
                     
-                    # Update database Supabase
                     supabase.table("books").update({
-                        "judul": edit_judul,
-                        "penulis": edit_penulis,
-                        "kategori": edit_kategori,
-                        "status": edit_status,
-                        "link_pdf": link_pdf_baru
+                        "judul": edit_judul, "penulis": edit_penulis,
+                        "kategori": edit_kategori, "status": edit_status,
+                        "sinopsis": edit_sinopsis,
+                        "link_pdf": link_pdf_baru, "cover_url": link_cover_baru
                     }).eq("id_buku", data_buku['id_buku']).execute()
                     
                     st.success(f"Buku '{edit_judul}' berhasil diperbarui!")
                     st.rerun()
                     
                 if submit_delete:
-                    # Menghapus dari Supabase
                     supabase.table("books").delete().eq("id_buku", data_buku['id_buku']).execute()
                     st.success(f"Buku '{buku_pilihan}' berhasil dihapus secara permanen!")
                     st.rerun()
         else:
             st.warning("Belum ada buku di database.")
-            
-    # Tampilkan database real-time di bagian bawah
-    st.divider()
-    st.subheader("Database Katalog Saat Ini")
-    st.dataframe(df_books, use_container_width=True, hide_index=True)
